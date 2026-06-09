@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 RANDOM_SEED = 42
@@ -14,9 +15,11 @@ class Config:
     SUBMISSION_OUT_PATH = DATA_DIR / "submission.csv"
 
     ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
-    SCORES_DIR = ARTIFACTS_DIR / "scores"
-    PARAMS_DIR = ARTIFACTS_DIR / "params"
-    OPTUNA_DIR = ARTIFACTS_DIR / "optuna"
+    # Score matrices are large (~1.2 GB each for Fold B). Redirect them to a
+    # scratch disk with space via:  export RS_SCORES_DIR=/local/<user>/rs_scores
+    SCORES_DIR = Path(os.environ.get("RS_SCORES_DIR", str(ARTIFACTS_DIR / "scores")))
+    PARAMS_DIR = ARTIFACTS_DIR / "params"      # small (JSON) — stays in project
+    OPTUNA_DIR = ARTIFACTS_DIR / "optuna"      # small (SQLite) — stays in project
     MODELS_DIR = ARTIFACTS_DIR / "models"
 
     K = 10
