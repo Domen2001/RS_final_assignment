@@ -81,6 +81,14 @@ class Config:
     BERT4REC_BATCH_SIZE = 512
     BERT4REC_LR = 1e-3
 
+    # ── Recency transitions (sequential rules, CPU) ──────────────────
+    RECENCY_WINDOW = 3
+    RECENCY_DECAY = 1.0
+    RECENCY_RECENCY_DECAY = 0.5
+    RECENCY_SHRINKAGE = 10.0
+    RECENCY_POP_DISCOUNT = 0.0
+    RECENCY_MAX_RECENT = 20
+
     # ── Tuning ───────────────────────────────────────────────────────
     # Optuna time limits per model (seconds)
     TUNE_TIMEOUT = {
@@ -93,6 +101,7 @@ class Config:
         "content":    1200,
         "lightgcn":   3600,
         "bert4rec":   3600,
+        "recency":    1800,
     }
     TUNE_N_TRIALS = {
         "popularity": 10,
@@ -104,6 +113,7 @@ class Config:
         "content":    10,   # only `topk` varies; sim matrix rebuilt each trial
         "lightgcn":   15,
         "bert4rec":   12,
+        "recency":    40,
     }
     # Fold used as the Optuna objective ("a" = submission LOO, "b" = global LOO)
     TUNE_FOLD = "b"
@@ -111,7 +121,8 @@ class Config:
     # ── Ensemble ─────────────────────────────────────────────────────
     # All trained models; subset via --models on the CLI.
     ENSEMBLE_MODELS = ["ease", "als", "itemknn", "popularity",
-                       "bpr", "multvae", "content", "lightgcn", "bert4rec"]
+                       "bpr", "multvae", "content", "lightgcn", "bert4rec",
+                       "recency"]
     ENSEMBLE_RRF_K = 60        # RRF constant (60 is the standard default)
     # Fold for ensemble weight tuning. "b" = robust (many users), "a" = faithful.
     ENSEMBLE_TUNE_FOLD = "b"

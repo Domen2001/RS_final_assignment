@@ -14,7 +14,7 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 export OPENBLAS_NUM_THREADS=1
 
-MODELS="ease als itemknn popularity bpr multvae content lightgcn bert4rec"
+MODELS="ease als itemknn popularity bpr multvae content lightgcn bert4rec recency"
 
 echo "============================================================"
 echo "  Recommender Systems Final Assignment — full pipeline"
@@ -31,6 +31,7 @@ python src/tune.py --model multvae    --fold b
 python src/tune.py --model content    --fold b
 python src/tune.py --model lightgcn   --fold b
 python src/tune.py --model bert4rec   --fold b
+python src/tune.py --model recency    --fold b
 python src/tune.py --model popularity --fold b
 
 # ── 2. Train all models, cache scores for BOTH folds ─────────────────────────

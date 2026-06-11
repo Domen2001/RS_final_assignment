@@ -155,13 +155,23 @@ def build_model(model_name: str, params: dict | None = None):
             lr=p.get("lr", Config.BERT4REC_LR),
             random_state=RANDOM_SEED,
         )
+    if model_name == "recency":
+        from src.models.recency import RecencyTransitionRecommender
+        return RecencyTransitionRecommender(
+            window=p.get("window", Config.RECENCY_WINDOW),
+            decay=p.get("decay", Config.RECENCY_DECAY),
+            recency_decay=p.get("recency_decay", Config.RECENCY_RECENCY_DECAY),
+            shrinkage=p.get("shrinkage", Config.RECENCY_SHRINKAGE),
+            pop_discount=p.get("pop_discount", Config.RECENCY_POP_DISCOUNT),
+            max_recent=Config.RECENCY_MAX_RECENT,
+        )
     raise ValueError(f"Unknown model: {model_name}")
 
 
 # ── Main training loop ───────────────────────────────────────────────────────
 
 ALL_MODELS = ["popularity", "itemknn", "ease", "als", "bpr", "multvae",
-              "content", "lightgcn", "bert4rec"]
+              "content", "lightgcn", "bert4rec", "recency"]
 
 
 def run(fold_name: str = "a", model_names: list | None = None, df_full=None,

@@ -81,6 +81,15 @@ def suggest_params(trial, model_name: str) -> dict:
     if model_name == "content":
         return {"topk": trial.suggest_int("topk", 20, 400)}
 
+    if model_name == "recency":
+        return {
+            "window":        trial.suggest_int("window", 1, 10),
+            "decay":         trial.suggest_float("decay", 0.1, 2.0),
+            "recency_decay": trial.suggest_float("recency_decay", 0.0, 2.0),
+            "shrinkage":     trial.suggest_float("shrinkage", 0.0, 100.0),
+            "pop_discount":  trial.suggest_float("pop_discount", 0.0, 1.0),
+        }
+
     if model_name == "lightgcn":
         return {
             "embedding_dim": trial.suggest_categorical("embedding_dim", [64, 128, 192]),
@@ -228,7 +237,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True,
                         choices=["popularity", "itemknn", "ease", "als",
-                                 "bpr", "multvae", "content", "lightgcn", "bert4rec"])
+                                 "bpr", "multvae", "content", "lightgcn", "bert4rec",
+                                 "recency"])
     parser.add_argument("--fold",    default="b",    choices=["a", "b"])
     parser.add_argument("--n_trials", type=int, default=None,
                         help="Overrides Config.TUNE_N_TRIALS if provided")
