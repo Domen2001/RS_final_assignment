@@ -1,46 +1,28 @@
-"""
-Item content features from item_meta.csv.
-
-Builds a TF-IDF matrix over concatenated text fields (title, categories,
-features, description, brand, …).  All features are derived ONLY from the
-provided data — no external pretrained embeddings (competition rule).
-
-Output rows are aligned to the model's item index space (item_to_idx);
-items with no metadata get an all-zero row.
-"""
-
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
 
-# Text columns to concatenate into one "document" per item.
+# Text columns we join together for each item.
 _TEXT_COLS = ["main_category", "title", "store", "categories",
               "features", "description", "subtitle"]
 
 
 def build_content_tfidf(config, item_to_idx: dict, max_features: int = 30000,
                         min_df: int = 2):
-    """
-    Build an L2-normalised TF-IDF matrix aligned to item_to_idx.
-
-    Returns
-    -------
-    tfidf : csr_matrix [n_items × n_features]
-        Row i corresponds to the item with index i in item_to_idx.
-    """
+    # Build a TF-IDF matrix in the same item order as the other models.
     from sklearn.feature_extraction.text import TfidfVectorizer
 
     meta = pd.read_csv(config.ITEM_META_PATH)
 
-    # Concatenate available text columns into a single string per row
+    # Put all available text for an item into one string.
     present = [c for c in _TEXT_COLS if c in meta.columns]
     meta["_text"] = (
         meta[present].fillna("").astype(str).agg(" ".join, axis=1)
     )
 
-    # Map item_id -> document text
+    # Look up text by item id.
     id_to_text = dict(zip(meta["item_id"], meta["_text"]))
 
     n_items = len(item_to_idx)
@@ -63,7 +45,7 @@ def build_content_tfidf(config, item_to_idx: dict, max_features: int = 30000,
         sublinear_tf=True,
         ngram_range=(1, 2),
     )
-    tfidf = vectorizer.fit_transform(docs)   # already L2-normalised by default
+    tfidf = vectorizer.fit_transform(docs)   # TF-IDF normalizes rows by default.
     print(f"Content: TF-IDF matrix {tfidf.shape}, nnz={tfidf.nnz:,}")
 
     return tfidf.astype(np.float32)

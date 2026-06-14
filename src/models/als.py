@@ -1,12 +1,3 @@
-"""
-Matrix factorisation via Alternating Least Squares (ALS).
-
-Uses the 'implicit' library which provides fast CPU/GPU ALS for implicit data.
-
-Confidence model: C = 1 + alpha * R  (Hu et al., 2008)
-Score(u) = user_factors[u] @ item_factors.T
-"""
-
 from __future__ import annotations
 
 import os
@@ -17,25 +8,9 @@ from scipy.sparse import csr_matrix
 from src.data import DataBundle
 from src.models.base import Recommender
 
-# Suppress OpenBLAS threading warning
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
-
 class ALSRecommender(Recommender):
-    """
-    Parameters
-    ----------
-    factors : int
-        Embedding dimensionality.  Higher = more expressive, slower.
-    regularization : float
-        L2 regularisation for ALS updates.
-    iterations : int
-        Number of ALS alternation steps.
-    alpha : float
-        Confidence scaling: C = 1 + alpha * R.
-    random_state : int
-        For reproducibility.
-    """
 
     def __init__(
         self,
@@ -51,9 +26,9 @@ class ALSRecommender(Recommender):
         self.alpha          = alpha
         self.random_state   = random_state
 
-        self._user_factors: np.ndarray | None = None  # [n_users × factors]
-        self._item_factors: np.ndarray | None = None  # [n_items × factors]
-        self._train_matrix = None  # kept for the legacy recommend() path
+        self._user_factors: np.ndarray | None = None
+        self._item_factors: np.ndarray | None = None
+        self._train_matrix = None  # Used by the shared recommend methods
 
     def fit(self, bundle: DataBundle) -> "ALSRecommender":
         try:
@@ -89,5 +64,5 @@ class ALSRecommender(Recommender):
         return self
 
     def score_users(self, user_idxs: np.ndarray) -> np.ndarray:
-        """Score = U[user_idxs] @ Vᵀ  →  float32 [U × n_items]."""
+        # Score every item for each requested user.
         return self._user_factors[user_idxs] @ self._item_factors.T

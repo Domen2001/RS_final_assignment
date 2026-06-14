@@ -1,17 +1,3 @@
-"""
-Mult-VAE — Variational Autoencoder with multinomial likelihood.
-Liang et al., "Variational Autoencoders for Collaborative Filtering", WWW 2018.
-
-A denoising autoencoder over the user's full item-interaction vector:
-    encoder:  x → (μ, logσ²)   with input dropout
-    sample:   z ~ N(μ, σ²)     (reparameterisation; μ only at inference)
-    decoder:  z → logits over all items
-Loss = multinomial NLL + β · KL(q(z|x) ‖ N(0,I)),  β annealed 0 → VAE_BETA.
-
-This neural model has a very different inductive bias from the shallow
-item-item / MF models and adds strong diversity to the ensemble.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -20,24 +6,13 @@ from src.config import RANDOM_SEED
 from src.data import DataBundle
 from src.models.base import Recommender
 
-
 def _get_torch():
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
     return torch, nn, F
 
-
 class MultVAERecommender(Recommender):
-    """
-    Parameters
-    ----------
-    hidden, latent : encoder/decoder width and bottleneck size.
-    dropout        : input dropout (denoising strength).
-    lr, weight_decay, batch_size, epochs : optimisation settings.
-    beta           : maximum KL weight after annealing.
-    anneal_epochs  : epochs over which β ramps linearly from 0 → beta.
-    """
 
     def __init__(
         self,
@@ -67,7 +42,7 @@ class MultVAERecommender(Recommender):
         self._device = None
         self._train_matrix = None
 
-    # ── Network definition ────────────────────────────────────────────────────
+    # Build the neural network.
     def _build_net(self, n_items):
         torch, nn, F = _get_torch()
 
@@ -97,13 +72,13 @@ class MultVAERecommender(Recommender):
                     std = torch.exp(0.5 * logvar)
                     z = mu + std * torch.randn_like(std)
                 else:
-                    z = mu                       # deterministic at inference
+                    z = mu # deterministic at inference
                 h = torch.tanh(self.dec1(z))
                 return self.dec2(h), mu, logvar
 
         return _Net(n_items, self.hidden, self.latent, self.dropout)
 
-    # ── Training ──────────────────────────────────────────────────────────────
+    # Train the model.
     def fit(self, bundle: DataBundle) -> "MultVAERecommender":
         torch, nn, F = _get_torch()
         torch.manual_seed(self.random_state)
@@ -121,7 +96,7 @@ class MultVAERecommender(Recommender):
         opt = torch.optim.Adam(self._model.parameters(),
                                lr=self.lr, weight_decay=self.weight_decay)
 
-        # Only train on users who actually have interactions
+        # Only train on users with history.
         active_users = np.where(np.asarray(self._train_matrix.sum(axis=1)).ravel() > 0)[0]
 
         step = 0
@@ -140,7 +115,7 @@ class MultVAERecommender(Recommender):
 
                 logits, mu, logvar = self._model(x)
                 log_softmax = F.log_softmax(logits, dim=1)
-                # Multinomial negative log-likelihood
+                # Main reconstruction loss.
                 nll = -(log_softmax * x).sum(dim=1).mean()
                 kld = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum(dim=1).mean()
 
@@ -161,9 +136,9 @@ class MultVAERecommender(Recommender):
         print("Mult-VAE: fit complete")
         return self
 
-    # ── Scoring ───────────────────────────────────────────────────────────────
+    # Score users.
     def score_users(self, user_idxs: np.ndarray) -> np.ndarray:
-        """Forward pass (μ only) → logits over all items.  float32 [U × n_items]."""
+        # Score every item for each requested user.
         torch, _, _ = _get_torch()
         out = np.empty((len(user_idxs), self.n_items), dtype=np.float32)
 

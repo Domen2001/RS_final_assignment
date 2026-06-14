@@ -1,15 +1,3 @@
-"""
-LightGCN — graph-based collaborative filtering (He et al., SIGIR 2020).
-
-Users and items are nodes in a bipartite graph; interactions are edges.
-Embeddings are propagated over the symmetrically-normalised adjacency
-(D^-1/2 · A · D^-1/2) and averaged across layers; trained with BPR loss.
-
-Ported from the team's standalone implementation to our Recommender interface:
-the network is unchanged, but training/scoring use the shared DataBundle index
-space so scores align with every other model for ensembling.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -20,7 +8,6 @@ import torch.nn.functional as F
 from src.config import RANDOM_SEED
 from src.data import DataBundle
 from src.models.base import Recommender
-
 
 class _LightGCNNet(nn.Module):
     def __init__(self, num_users, num_items, embedding_dim=128, num_layers=2):
@@ -34,7 +21,7 @@ class _LightGCNNet(nn.Module):
         nn.init.normal_(self.item_embedding.weight, std=0.01)
 
     def propagate(self, norm_adj):
-        """Layer propagation → final (mean-pooled) user & item embeddings."""
+        # Pass embeddings through the graph layers.
         all_emb = torch.cat([self.user_embedding.weight, self.item_embedding.weight], dim=0)
         embs = [all_emb]
         cur = all_emb
@@ -51,15 +38,7 @@ class _LightGCNNet(nn.Module):
         neg_s = (u * ie[neg]).sum(-1)
         return pos_s, neg_s
 
-
 class LightGCNRecommender(Recommender):
-    """
-    Parameters
-    ----------
-    embedding_dim : node embedding size.
-    num_layers    : number of graph propagation layers.
-    epochs, batch_size, lr, weight_decay : optimisation settings.
-    """
 
     def __init__(
         self,
@@ -84,15 +63,15 @@ class LightGCNRecommender(Recommender):
         self._model = None
         self._norm_adj = None
         self._device = None
-        self._user_emb = None   # cached after fit
+        self._user_emb = None
         self._item_emb = None
 
-    # ── Normalised bipartite adjacency from the interaction matrix ──
+    # Build the graph matrix from user-item interactions.
     def _build_norm_adj(self, R, n_users, n_items):
         coo = R.tocoo()
         u = coo.row
-        item_node = n_users + coo.col           # item nodes offset after users
-        rows = np.concatenate([u, item_node])   # symmetric edges
+        item_node = n_users + coo.col # item nodes offset after users
+        rows = np.concatenate([u, item_node]) # symmetric edges
         cols = np.concatenate([item_node, u])
 
         n_nodes = n_users + n_items
@@ -120,7 +99,7 @@ class LightGCNRecommender(Recommender):
 
         self._norm_adj = self._build_norm_adj(R, n_users, n_items).to(self._device)
 
-        # Positive (user, item) edges + per-user positive sets for neg sampling
+        # Store known user-item pairs for training.
         coo = R.tocoo()
         pos_users = coo.row.astype(np.int64)
         pos_items = coo.col.astype(np.int64)
@@ -140,7 +119,7 @@ class LightGCNRecommender(Recommender):
                 b = perm[start:start + self.batch_size]
                 u = pos_users[b]
                 p = pos_items[b]
-                # vectorised negative sampling with rejection of known positives
+                # Pick negative items the user has not seen.
                 neg = rng.integers(0, n_items, size=len(b))
                 for i in range(len(b)):
                     while neg[i] in user_pos[u[i]]:
@@ -160,7 +139,7 @@ class LightGCNRecommender(Recommender):
             if epoch % 10 == 0 or epoch == 1:
                 print(f"  epoch {epoch:02d}/{self.epochs}  BPR loss={total / n:.6f}")
 
-        # Cache propagated embeddings once (scoring is then a plain matmul)
+        # Cache embeddings so scoring is faster.
         self._model.eval()
         with torch.no_grad():
             ue, ie = self._model.propagate(self._norm_adj)
@@ -170,7 +149,7 @@ class LightGCNRecommender(Recommender):
         return self
 
     def score_users(self, user_idxs: np.ndarray) -> np.ndarray:
-        """Score = propagated_user_emb @ item_embᵀ  →  float32 [U × n_items]."""
+        # Score every item for each requested user.
         out = np.empty((len(user_idxs), self.n_items), dtype=np.float32)
         with torch.no_grad():
             for start in range(0, len(user_idxs), self.score_batch_size):

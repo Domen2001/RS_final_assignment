@@ -1,19 +1,3 @@
-"""
-Train all Tier-1 models on a given fold and cache their score matrices.
-
-Usage:
-    python src/train_all.py --fold a          # Fold A (submission LOO) — default
-    python src/train_all.py --fold b          # Fold B (global LOO)
-    python src/train_all.py --fold a --models ease als   # subset of models
-
-Outputs (per model):
-    artifacts/scores/<model>_<fold>.npy        — float32 [n_eval × n_items]
-    artifacts/scores/<model>_<fold>_meta.pkl   — targets + seen-item sets
-
-Then run:
-    python src/evaluate.py --fold a
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -43,7 +27,7 @@ from src.evaluate import print_leaderboard
 np.random.seed(RANDOM_SEED)
 
 
-# ── Score caching helpers ────────────────────────────────────────────────────
+# Score caching helpers.
 
 def save_scores(
     model_name: str,
@@ -61,7 +45,7 @@ def save_scores(
 
 
 def load_best_params(model_name: str) -> dict:
-    """Load tuned hyperparams if they exist, otherwise return empty dict."""
+    # Load tuned hyperparams if they exist.
     path = Config.PARAMS_DIR / f"{model_name}_best.json"
     if path.exists():
         with open(path) as f:
@@ -71,10 +55,10 @@ def load_best_params(model_name: str) -> dict:
     return {}
 
 
-# ── Model factory ────────────────────────────────────────────────────────────
+# Model factory.
 
 def build_model(model_name: str, params: dict | None = None):
-    """Instantiate the model, applying tuned params where available."""
+    # Instantiate the model with tuned params where available.
     p = params or load_best_params(model_name)
 
     if model_name == "popularity":
@@ -168,7 +152,7 @@ def build_model(model_name: str, params: dict | None = None):
     raise ValueError(f"Unknown model: {model_name}")
 
 
-# ── Main training loop ───────────────────────────────────────────────────────
+# Main training loop.
 
 ALL_MODELS = ["popularity", "itemknn", "ease", "als", "bpr", "multvae",
               "content", "lightgcn", "bert4rec", "recency"]
@@ -176,29 +160,22 @@ ALL_MODELS = ["popularity", "itemknn", "ease", "als", "bpr", "multvae",
 
 def run(fold_name: str = "a", model_names: list | None = None, df_full=None,
         train_only: bool = True) -> dict:
-    """
-    Train each model on the given fold, cache score matrices, return metrics.
-
-    train_only : if True (default), use only train.csv for validation —
-                 avoids the temporal information leak from test.csv.
-                 submit.py always uses the full combined data.
-    """
+    # Train each model on a fold and cache its score matrix.
     if model_names is None:
         model_names = ALL_MODELS
 
-    # ── Data ──────────────────────────────────────────────────────────────────
     if df_full is None:
         if train_only:
-            print("Loading train.csv only (honest local validation)…")
+            print("Loading train.csv only (honest local validation)...")
             df_full = load_train_only(Config)
         else:
-            print("Loading combined train+test data…")
+            print("Loading combined train+test data...")
             df_full = load_all_data(Config)
 
     sub_ids = load_submission_user_ids(Config)
     user_to_idx, idx_to_user, item_to_idx, idx_to_item = build_id_maps(df_full)
 
-    print(f"\nBuilding Fold {fold_name.upper()}…")
+    print(f"\nBuilding Fold {fold_name.upper()}...")
     if fold_name == "a":
         train_df, val_targets = fold_a(df_full, sub_ids)
     elif fold_name == "b":
@@ -214,31 +191,30 @@ def run(fold_name: str = "a", model_names: list | None = None, df_full=None,
     )
 
     if train_only:
-        print("  (validation trained on train.csv only — honest estimate, no time-leak)")
+        print("  (validation trained on train.csv only; honest estimate, no time-leak)")
 
-    # Align val_targets with matrix indices
+    # Align targets with matrix indices.
     eval_user_idxs, target_item_idxs = val_targets_to_arrays(
         val_targets, user_to_idx, item_to_idx
     )
 
-    # seen-item sets for evaluation (use train-only history)
+    # Use train-only history for evaluation masking.
     user_seen_idxs = [
         train_bundle.user_seen_idxs.get(u_idx, set())
         for u_idx in eval_user_idxs
     ]
 
-    # ── Train + score each model ──────────────────────────────────────────────
     results = {}
 
     for model_name in model_names:
         print(f"\n{'='*60}")
-        print(f"Training  {model_name.upper()}  (fold={fold_name})…")
+        print(f"Training  {model_name.upper()}  (fold={fold_name})...")
         print(f"{'='*60}")
 
         t_start = time.time()
         model = build_model(model_name)
 
-        # Popularity can use time-decay if we pass df
+        # Popularity can use time decay when timestamps are available.
         if model_name == "popularity" and model.halflife_days is not None:
             model.fit_with_decay(train_bundle, train_df)
         else:
@@ -247,9 +223,9 @@ def run(fold_name: str = "a", model_names: list | None = None, df_full=None,
         t_fit = time.time() - t_start
         print(f"  fit time: {t_fit:.1f}s")
 
-        print(f"  scoring {len(eval_user_idxs):,} eval users…")
+        print(f"  scoring {len(eval_user_idxs):,} eval users...")
         t_score = time.time()
-        score_matrix = model.score_users(eval_user_idxs)  # [n_eval × n_items]
+        score_matrix = model.score_users(eval_user_idxs)
         t_score = time.time() - t_score
         print(f"  score time: {t_score:.1f}s  "
               f"(matrix: {score_matrix.shape}, {score_matrix.nbytes / 1e6:.0f} MB)")
@@ -264,7 +240,7 @@ def run(fold_name: str = "a", model_names: list | None = None, df_full=None,
             score_matrix, target_item_idxs, user_seen_idxs,
             Config.SCORES_DIR,
         )
-        print(f"  → scores cached to artifacts/scores/{model_name}_{fold_name}.npy")
+        print(f"  -> scores cached to artifacts/scores/{model_name}_{fold_name}.npy")
 
     print()
     print_leaderboard(results, fold=fold_name)
@@ -277,7 +253,7 @@ def main():
     parser.add_argument("--models",     nargs="+",   default=None,
                         help="Subset of models to train (default: all)")
     parser.add_argument("--combined",   action="store_true",
-                        help="Use train+test combined (inflates local score — don't use)")
+                        help="Use train+test combined (inflates local score; don't use)")
     args = parser.parse_args()
     run(fold_name=args.fold, model_names=args.models, train_only=not args.combined)
 

@@ -1,17 +1,3 @@
-"""
-Abstract base class for all recommender models.
-
-Every model must implement:
-  fit(bundle)           — train on a DataBundle
-  score_users(idxs)     — return float32 [len(idxs) × n_items] score matrix
-
-The score matrix must be higher for more preferred items.
-Seen-item masking is handled by the caller (metrics.py / ensemble).
-
-recommend() provides a convenient single-user API for backward compatibility
-and for submit.py's fallback logic.
-"""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -21,7 +7,6 @@ import numpy as np
 
 from src.data import DataBundle
 
-
 class Recommender(ABC):
 
     @abstractmethod
@@ -30,7 +15,7 @@ class Recommender(ABC):
 
     @abstractmethod
     def score_users(self, user_idxs: np.ndarray) -> np.ndarray:
-        """Return float32 [len(user_idxs) × n_items]. Higher = more preferred."""
+        # Return one score per item for each user.
         ...
 
     def recommend(
@@ -40,7 +25,7 @@ class Recommender(ABC):
         seen_items: Optional[Set] = None,
         k: int = 10,
     ) -> List:
-        """Single-user top-k recommendation using original string IDs."""
+        # Recommend top items for one user.
         if seen_items is None:
             seen_items = set()
 
@@ -53,7 +38,7 @@ class Recommender(ABC):
             return self._fallback_recommend(seen_items, k)
 
         user_idx = user_to_idx[user_id]
-        scores   = self.score_users(np.array([user_idx], dtype=np.int32))[0]  # [n_items]
+        scores   = self.score_users(np.array([user_idx], dtype=np.int32))[0]
 
         # Mask seen items
         seen_idxs = [item_to_idx[i] for i in seen_items if i in item_to_idx]
@@ -66,10 +51,10 @@ class Recommender(ABC):
         return [idx_to_item[idx] for idx in top_k_idxs if idx in idx_to_item]
 
     def _fallback_recommend(self, seen_items: Set, k: int) -> List:
-        """Fallback used when user is unknown. Override in subclasses."""
+        # Models can override this for unknown users.
         return []
 
-    # Convenience: expose ID maps set during fit() so recommend() works
+    # Store the id maps so recommend() can use the original ids.
     def _store_id_maps(self, bundle: DataBundle) -> None:
         self.user_to_idx = bundle.user_to_idx
         self.idx_to_user = bundle.idx_to_user

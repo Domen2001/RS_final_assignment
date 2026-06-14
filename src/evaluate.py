@@ -1,10 +1,3 @@
-"""
-Evaluate cached score matrices and print a leaderboard table.
-
-Score matrices are loaded from artifacts/scores/<model>_<fold>.npy.
-Target/seen-item metadata is loaded from artifacts/scores/<model>_<fold>_meta.pkl.
-"""
-
 from __future__ import annotations
 
 import pickle
@@ -22,15 +15,7 @@ from src.metrics import compute_metrics
 
 
 def load_scores(model_name: str, fold: str, scores_dir: Path | None = None):
-    """
-    Load a cached score matrix and its evaluation metadata.
-
-    Returns
-    -------
-    scores : np.ndarray [n_eval × n_items]
-    target_item_idxs : list[int]
-    user_seen_idxs : list[set[int]]
-    """
+    # Load a cached score matrix and its evaluation metadata
     if scores_dir is None:
         scores_dir = Config.SCORES_DIR
 
@@ -49,19 +34,19 @@ def load_scores(model_name: str, fold: str, scores_dir: Path | None = None):
 
 
 def evaluate_model(model_name: str, fold: str, k: int = 10) -> Dict[str, float]:
-    """Load cached scores and compute metrics."""
+    # Load cached scores and compute metrics
     scores, targets, seen = load_scores(model_name, fold)
     return compute_metrics(scores, targets, seen, k=k)
 
 
 def print_leaderboard(results: Dict[str, Dict[str, float]], fold: str, k: int = 10):
-    """Print a sorted results table."""
+    # Print a sorted results table
     col = f"recall@{k}"
     sorted_results = sorted(results.items(), key=lambda x: x[1].get(col, 0), reverse=True)
 
     header = f"{'Model':<14}  {'Recall@'+str(k):>10}  {'NDCG@'+str(k):>10}"
     print()
-    print(f"Leaderboard — Fold {fold.upper()}")
+    print(f"Leaderboard - Fold {fold.upper()}")
     print("=" * len(header))
     print(header)
     print("-" * len(header))

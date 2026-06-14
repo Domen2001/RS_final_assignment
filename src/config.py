@@ -18,52 +18,52 @@ class Config:
     # Score matrices are large (~1.2 GB each for Fold B). Redirect them to a
     # scratch disk with space via:  export RS_SCORES_DIR=/local/<user>/rs_scores
     SCORES_DIR = Path(os.environ.get("RS_SCORES_DIR", str(ARTIFACTS_DIR / "scores")))
-    PARAMS_DIR = ARTIFACTS_DIR / "params"      # small (JSON) — stays in project
-    OPTUNA_DIR = ARTIFACTS_DIR / "optuna"      # small (SQLite) — stays in project
+    PARAMS_DIR = ARTIFACTS_DIR / "params"
+    OPTUNA_DIR = ARTIFACTS_DIR / "optuna"
     MODELS_DIR = ARTIFACTS_DIR / "models"
 
     K = 10
 
-    # ── Popularity ──────────────────────────────────────────────────
-    # recency_halflife: half-life in days for exponential time-decay (None = no decay)
+    # Popularity.
+    # Half-life in days for exponential time decay.
     POPULARITY_HALFLIFE_DAYS = 365
 
-    # ── Item-item cosine KNN ─────────────────────────────────────────
-    ITEMKNN_TOPK = 200         # max neighbors kept per item
-    ITEMKNN_SHRINKAGE = 100    # denominator shrinkage (penalises rare co-occurrence)
+    # Item-item cosine KNN
+    ITEMKNN_TOPK = 200
+    ITEMKNN_SHRINKAGE = 100
 
-    # ── EASE^R ───────────────────────────────────────────────────────
-    EASE_LAMBDA = 500.0        # L2 regularisation; higher = more regularised
+    # EASE
+    EASE_LAMBDA = 500.0
 
-    # ── ALS (implicit) ───────────────────────────────────────────────
+    # ALS
     ALS_FACTORS = 128
     ALS_REGULARIZATION = 0.05
     ALS_ITERATIONS = 50
-    ALS_ALPHA = 20.0           # confidence scaling: C = 1 + alpha * R
+    ALS_ALPHA = 20.0
 
-    # ── BPR (implicit) ───────────────────────────────────────────────
+    # BPR
     BPR_FACTORS = 128
     BPR_LEARNING_RATE = 0.01
     BPR_REGULARIZATION = 0.01
     BPR_ITERATIONS = 100
 
-    # ── Mult-VAE (PyTorch) ───────────────────────────────────────────
-    VAE_HIDDEN = 600           # encoder/decoder hidden width
-    VAE_LATENT = 200           # latent (bottleneck) dimension
-    VAE_DROPOUT = 0.5          # input dropout (denoising)
+    # Mult-VAE
+    VAE_HIDDEN = 600
+    VAE_LATENT = 200
+    VAE_DROPOUT = 0.5
     VAE_LR = 1e-3
     VAE_WEIGHT_DECAY = 0.0
     VAE_BATCH_SIZE = 500
     VAE_EPOCHS = 150
-    VAE_BETA = 0.2             # max KL weight after annealing
-    VAE_ANNEAL_EPOCHS = 50     # epochs to ramp beta from 0 -> VAE_BETA
+    VAE_BETA = 0.2
+    VAE_ANNEAL_EPOCHS = 50
 
-    # ── Content-KNN (item metadata) ──────────────────────────────────
-    CONTENT_TOPK = 200         # neighbours kept per item
-    CONTENT_MAX_FEATURES = 30000   # TF-IDF vocabulary cap
+    # Content-KNN
+    CONTENT_TOPK = 200
+    CONTENT_MAX_FEATURES = 30000
     CONTENT_MIN_DF = 2
 
-    # ── LightGCN (graph, PyTorch) ────────────────────────────────────
+    # LightGCN
     LIGHTGCN_DIM = 128
     LIGHTGCN_LAYERS = 2
     LIGHTGCN_EPOCHS = 30
@@ -71,7 +71,7 @@ class Config:
     LIGHTGCN_LR = 1e-3
     LIGHTGCN_WEIGHT_DECAY = 1e-6
 
-    # ── BERT4Rec (sequential, PyTorch) ───────────────────────────────
+    # BERT4Rec
     BERT4REC_MAX_SEQ_LEN = 20
     BERT4REC_DIM = 128
     BERT4REC_HEADS = 4
@@ -81,7 +81,7 @@ class Config:
     BERT4REC_BATCH_SIZE = 512
     BERT4REC_LR = 1e-3
 
-    # ── Recency transitions (sequential rules, CPU) ──────────────────
+    # Recency transitions
     RECENCY_WINDOW = 3
     RECENCY_DECAY = 1.0
     RECENCY_RECENCY_DECAY = 0.5
@@ -89,7 +89,7 @@ class Config:
     RECENCY_POP_DISCOUNT = 0.0
     RECENCY_MAX_RECENT = 20
 
-    # ── Tuning ───────────────────────────────────────────────────────
+    # Tuning.
     # Optuna time limits per model (seconds)
     TUNE_TIMEOUT = {
         "popularity": 120,
@@ -110,19 +110,19 @@ class Config:
         "als":        50,
         "bpr":        40,
         "multvae":    20,
-        "content":    10,   # only `topk` varies; sim matrix rebuilt each trial
+        "content":    10,
         "lightgcn":   15,
         "bert4rec":   12,
         "recency":    40,
     }
-    # Fold used as the Optuna objective ("a" = submission LOO, "b" = global LOO)
+    # Fold used as the Optuna objective.
     TUNE_FOLD = "b"
 
-    # ── Ensemble ─────────────────────────────────────────────────────
-    # All trained models; subset via --models on the CLI.
+    # Ensemble.
+    # All trained models; subset via --models on the CLI
     ENSEMBLE_MODELS = ["ease", "als", "itemknn", "popularity",
                        "bpr", "multvae", "content", "lightgcn", "bert4rec",
                        "recency"]
-    ENSEMBLE_RRF_K = 60        # RRF constant (60 is the standard default)
-    # Fold for ensemble weight tuning. "b" = robust (many users), "a" = faithful.
+    ENSEMBLE_RRF_K = 60
+    # Fold for ensemble weight tuning. "b" = robust (many users), "a" = faithful
     ENSEMBLE_TUNE_FOLD = "b"

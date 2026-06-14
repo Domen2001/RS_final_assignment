@@ -1,20 +1,3 @@
-"""
-Recency-weighted sequential transition model (directional next-item rules).
-
-Idea — unlike the symmetric co-occurrence in ItemKNN, this learns DIRECTIONAL
-transitions: how often item B follows item A in a user's timeline, weighted by
-how close together they are. At scoring time we look at a user's MOST RECENT
-items and propagate those transition weights to candidate next-items.
-
-    T[a, b] = Σ_users Σ_{a at pos i, b at pos j>i, j-i ≤ window}  1 / (j-i)^decay
-    T_norm[a, b] = T[a, b] / (Σ_b T[a, b] + shrinkage)        # P(b follows a)
-    score(u, b) = Σ_{recent item a of u}  recency_w(a) · T_norm[a, b]
-                  / pop[b]^pop_discount                        # optional discount
-
-This directly models the Kaggle task ("predict the next item") and up-weights
-recent behaviour, attacking the temporal train→future gap. CPU-only, fast.
-"""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -25,19 +8,7 @@ from scipy.sparse import csr_matrix
 from src.data import DataBundle
 from src.models.base import Recommender
 
-
 class RecencyTransitionRecommender(Recommender):
-    """
-    Parameters
-    ----------
-    window : max position gap (j-i) counted as a transition. Small = more "next-ish".
-    decay : distance decay exponent; transition weight = 1 / (gap)^decay.
-    recency_decay : weight of a user's items by recency rank r (0 = newest):
-                    recency_w = 1 / (1 + r)^recency_decay.
-    shrinkage : row-normalisation shrinkage (penalises rare source items).
-    pop_discount : divide scores by pop[b]^pop_discount (0 = off; >0 favours tail).
-    max_recent : how many of the user's most recent unique items to score from.
-    """
 
     def __init__(
         self,
@@ -55,9 +26,9 @@ class RecencyTransitionRecommender(Recommender):
         self.pop_discount = pop_discount
         self.max_recent = max_recent
 
-        self._T = None                  # CSR [n_items × n_items], row-normalised
+        self._T = None
         self._user_sequences = None
-        self._pop_factor = None         # 1 / pop^pop_discount  (or ones)
+        self._pop_factor = None
 
     def fit(self, bundle: DataBundle) -> "RecencyTransitionRecommender":
         self._store_id_maps(bundle)
@@ -67,8 +38,8 @@ class RecencyTransitionRecommender(Recommender):
         print(f"Recency: counting directional transitions "
               f"(window={self.window}, decay={self.decay})…")
 
-        trans = defaultdict(float)      # (a, b) -> weighted count
-        row_sum = defaultdict(float)    # a -> Σ_b trans[a, b]
+        trans = defaultdict(float)
+        row_sum = defaultdict(float)
 
         for seq in self._user_sequences.values():
             L = len(seq)
@@ -82,7 +53,7 @@ class RecencyTransitionRecommender(Recommender):
                     trans[(a, b)] += w
                     row_sum[a] += w
 
-        # Build row-normalised sparse transition matrix: P(b follows a)
+        # Build the item-to-next-item transition matrix.
         rows = np.empty(len(trans), dtype=np.int32)
         cols = np.empty(len(trans), dtype=np.int32)
         vals = np.empty(len(trans), dtype=np.float32)
@@ -93,7 +64,7 @@ class RecencyTransitionRecommender(Recommender):
 
         self._T = csr_matrix((vals, (rows, cols)), shape=(n_items, n_items))
 
-        # Optional popularity discount factor (applied to candidate columns)
+        # Optionally reduce scores for very popular items.
         pop = np.asarray(bundle.train_matrix.sum(axis=0)).ravel().astype(np.float32)
         if self.pop_discount > 0:
             self._pop_factor = 1.0 / np.power(pop + 1.0, self.pop_discount)
@@ -104,7 +75,7 @@ class RecencyTransitionRecommender(Recommender):
         return self
 
     def _recent_unique(self, seq):
-        """Most-recent-first unique items, capped at max_recent."""
+        # Get recent items without repeats.
         seen, recent = set(), []
         for it in reversed(seq):
             if it in seen:
@@ -116,7 +87,7 @@ class RecencyTransitionRecommender(Recommender):
         return recent
 
     def score_users(self, user_idxs: np.ndarray) -> np.ndarray:
-        """Score = (recency-weighted recent items) @ T_norm  →  float32 [U × n_items]."""
+        # Score every item for each requested user.
         rows, cols, vals = [], [], []
         for row_i, u in enumerate(user_idxs):
             recent = self._recent_unique(self._user_sequences.get(int(u), []))

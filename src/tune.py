@@ -1,22 +1,3 @@
-"""
-Optuna hyperparameter tuning for Tier-1 models.
-
-Each model gets its own Optuna study, persisted to artifacts/optuna/<model>.db.
-Studies are resumable — re-running with the same model name adds more trials.
-
-Usage:
-    python src/tune.py --model ease   --fold b --n_trials 15
-    python src/tune.py --model als    --fold b --n_trials 50
-    python src/tune.py --model itemknn --fold b --n_trials 40
-    python src/tune.py --model popularity --fold b --n_trials 10
-
-    # After tuning all models, re-evaluate the best params on Fold A:
-    python src/tune.py --model ease --fold a --n_trials 0   # just evaluates
-
-Best params are saved to artifacts/params/<model>_best.json.
-Then run  python src/train_all.py --fold a  to cache the final score matrices.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -26,7 +7,6 @@ import sys
 import time
 from pathlib import Path
 
-# Ensure project root is on sys.path when script is run directly
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
@@ -39,11 +19,11 @@ from src.metrics import compute_metrics
 np.random.seed(RANDOM_SEED)
 
 
-# ── Hyperparameter search spaces ─────────────────────────────────────────────
+# Hyperparameter search spaces.
 
 def suggest_params(trial, model_name: str) -> dict:
     if model_name == "ease":
-        # widened lower bound — tuning showed the optimum sits well below 50
+        # Tuning showed the optimum can sit well below 50.
         return {"lam": trial.suggest_float("lam", 5.0, 2000.0, log=True)}
 
     if model_name == "itemknn":
@@ -117,11 +97,11 @@ def suggest_params(trial, model_name: str) -> dict:
     raise ValueError(f"Unknown model: {model_name}")
 
 
-# ── Objective factory ─────────────────────────────────────────────────────────
+# Build the Optuna objective.
 
 def make_objective(model_name, train_bundle, eval_user_idxs, target_item_idxs,
                    user_seen_idxs, train_df):
-    """Return an Optuna objective that fits the model and returns Recall@10."""
+    # Fit one model and return Recall@10 for the trial.
 
     def objective(trial):
         params = suggest_params(trial, model_name)
@@ -141,7 +121,7 @@ def make_objective(model_name, train_bundle, eval_user_idxs, target_item_idxs,
     return objective
 
 
-# ── Main tuning driver ────────────────────────────────────────────────────────
+# Run tuning for one model.
 
 def tune(model_name: str, fold_name: str, n_trials: int, timeout: int | None = None):
     try:
@@ -151,9 +131,8 @@ def tune(model_name: str, fold_name: str, n_trials: int, timeout: int | None = N
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    # ── Data ──────────────────────────────────────────────────────────────────
     print(f"\nTuning {model_name.upper()}  (fold={fold_name}, trials={n_trials})")
-    print("Loading train.csv only (honest validation)…")
+    print("Loading train.csv only (honest validation)...")
     df_full = load_train_only(Config)  # no time-leak from test.csv
     sub_ids = load_submission_user_ids(Config)
     user_to_idx, idx_to_user, item_to_idx, idx_to_item = build_id_maps(df_full)
@@ -162,7 +141,7 @@ def tune(model_name: str, fold_name: str, n_trials: int, timeout: int | None = N
         train_df, val_targets = fold_a(df_full, sub_ids)
     else:
         train_df, val_targets = fold_b(df_full)
-        # Subsample to 5k users for faster Fold B tuning
+        # Subsample Fold B to keep tuning fast.
         rng = np.random.default_rng(RANDOM_SEED)
         user_list = list(val_targets.keys())
         if len(user_list) > 5000:
@@ -184,7 +163,7 @@ def tune(model_name: str, fold_name: str, n_trials: int, timeout: int | None = N
     print(f"  {len(eval_user_idxs):,} eval users | "
           f"{train_bundle.n_items:,} items")
 
-    # ── Optuna study ──────────────────────────────────────────────────────────
+    # Reuse the study so more trials can be added later.
     Config.OPTUNA_DIR.mkdir(parents=True, exist_ok=True)
     db_path = Config.OPTUNA_DIR / f"{model_name}.db"
     storage = f"sqlite:///{db_path}"
@@ -203,7 +182,7 @@ def tune(model_name: str, fold_name: str, n_trials: int, timeout: int | None = N
     )
 
     if n_trials > 0:
-        print(f"  Running {n_trials} Optuna trials…  (db: {db_path})")
+        print(f"  Running {n_trials} Optuna trials...  (db: {db_path})")
         t0 = time.time()
         study.optimize(
             objective,
@@ -217,14 +196,14 @@ def tune(model_name: str, fold_name: str, n_trials: int, timeout: int | None = N
     print(f"\nBest  recall@10={best.value:.6f}")
     print(f"Best params: {best.params}")
 
-    # Save best params
+    # Save best params for train_all.py.
     Config.PARAMS_DIR.mkdir(parents=True, exist_ok=True)
     params_path = Config.PARAMS_DIR / f"{model_name}_best.json"
     with open(params_path, "w") as f:
         json.dump(best.params, f, indent=2)
-    print(f"Saved → {params_path}")
+    print(f"Saved -> {params_path}")
 
-    # Print top-5 trials
+    # Show the strongest trials for quick comparison.
     all_trials = sorted(study.trials, key=lambda t: t.value or 0, reverse=True)
     print("\nTop-5 trials:")
     for t in all_trials[:5]:

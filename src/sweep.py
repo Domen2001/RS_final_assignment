@@ -1,30 +1,3 @@
-"""
-sweep.py — generate many candidate submissions efficiently, ranked by a LOCAL
-Fold-A score so you only spend Kaggle submissions on the promising ones.
-
-Why this exists: submit.py retrains every model on each run (~15-20 min). Here we
-train each model ONCE on the full data, cache the submission-user scores, then
-explore many ensemble configurations (model subsets × RRF k × tuned weights) in
-seconds each. Every candidate is validated on Fold A so you can submit the best.
-
-It adds NO new model — it only orchestrates existing pieces:
-  build_model (train_all) · precompute_rrf / fast_recall (blend) ·
-  top_k_with_fallback (submit) · cached Fold A/B scores (evaluate).
-
-Prereq:  Fold A and Fold B scores cached for every model:
-    python src/train_all.py --fold b --models <all>
-    python src/train_all.py --fold a --models <all>
-
-Usage:
-    python src/sweep.py                          # default sweep
-    python src/sweep.py --rrf_ks 20 40 60 100 --n_trials 200
-    python src/sweep.py --models ease als multvae lightgcn recency
-
-Outputs:
-    data/sweep/<name>.csv      one submission per candidate
-    a ranked table of local Fold-A recall@10 (printed + data/sweep/_ranking.csv)
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -47,10 +20,10 @@ from src.train_all import build_model
 np.random.seed(RANDOM_SEED)
 
 
-# ── In-memory weight tuning (subset + rrf_k specific) ────────────────────────
+# Tune weights for one candidate
 
 def tune_weights(rrf_tune, targets, seen, model_names, n_trials):
-    """Optuna search over non-negative weights for one (subset, rrf_k)."""
+    # Search non-negative model weights
     import optuna
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -62,18 +35,18 @@ def tune_weights(rrf_tune, targets, seen, model_names, n_trials):
 
     study = optuna.create_study(direction="maximize",
                                 sampler=optuna.samplers.TPESampler(seed=RANDOM_SEED))
-    study.enqueue_trial({f"w_{m}": 1.0 for m in model_names})   # warm-start: equal
+    study.enqueue_trial({f"w_{m}": 1.0 for m in model_names})
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
     return [study.best_params[f"w_{m}"] for m in model_names]
 
 
-# ── Main sweep ────────────────────────────────────────────────────────────────
+# Main sweep.
 
 def run(model_names, rrf_ks, n_trials, max_eval_users, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Load cached fold scores (tuning = B, validation = A) ──
-    print("Loading cached Fold B / Fold A scores…")
+    # Load cached fold scores for tuning and validation
+    print("Loading cached Fold B / Fold A scores...")
     b_scores, tgt_b, seen_b = {}, None, None
     a_scores, tgt_a, seen_a = {}, None, None
     for m in model_names:
@@ -82,7 +55,7 @@ def run(model_names, rrf_ks, n_trials, max_eval_users, out_dir):
         s, t, se = load_scores(m, "a"); a_scores[m] = s
         if tgt_a is None: tgt_a, seen_a = t, se
 
-    # subsample fold B rows for fast weight tuning
+    # Subsample Fold B for fast weight tuning.
     n_b = b_scores[model_names[0]].shape[0]
     if n_b > max_eval_users:
         rng = np.random.default_rng(RANDOM_SEED)
@@ -91,8 +64,8 @@ def run(model_names, rrf_ks, n_trials, max_eval_users, out_dir):
         tgt_b = [tgt_b[i] for i in sel]
         seen_b = [seen_b[i] for i in sel]
 
-    # ── Train each model once on full data → submission-user scores ──
-    print("\nTraining each model once on full data (train+test)…")
+    # Train each model once on full data
+    print("\nTraining each model once on full data (train+test)...")
     df_full = load_all_data(Config)
     sub_ids = load_submission_user_ids(Config)
     u2i, i2u, it2i, i2it = build_id_maps(df_full)
@@ -115,31 +88,31 @@ def run(model_names, rrf_ks, n_trials, max_eval_users, out_dir):
     if pop_scores is None:
         pop_scores = np.asarray(full_bundle.train_matrix.sum(axis=0)).ravel()
 
-    # ── Define candidates ──
-    candidates = []   # (name, subset, rrf_k, weight_mode)
+    # Define candidate ensembles
+    candidates = []
     for k in rrf_ks:
         candidates.append((f"all_k{k}", model_names, k, "tuned"))
     candidates.append(("all_k60_equal", model_names, 60, "equal"))
-    for m in model_names:                                  # drop-one-out
+    for m in model_names:
         subset = [x for x in model_names if x != m]
         candidates.append((f"drop_{m}_k60", subset, 60, "tuned"))
 
-    # ── Evaluate + build each candidate ──
-    print(f"\nEvaluating {len(candidates)} candidates…\n")
+    # Evaluate and build each candidate
+    print(f"\nEvaluating {len(candidates)} candidates...\n")
     results = []
     for name, subset, k, mode in candidates:
-        # weights
+        # Choose weights for this candidate
         if mode == "equal":
             weights = [1.0] * len(subset)
         else:
             rrf_b = precompute_rrf([b_scores[m] for m in subset], k)
             weights = tune_weights(rrf_b, tgt_b, seen_b, subset, n_trials)
 
-        # local Fold-A score
+        # Score the candidate on Fold A
         rrf_a = precompute_rrf([a_scores[m] for m in subset], k)
         recall_a = fast_recall(blend_weighted(rrf_a, weights), tgt_a, seen_a)
 
-        # build submission
+        # Write the submission file
         blended = rrf_blend([sub_scores[m] for m in subset], weights, rrf_k=k)
         recs = top_k_with_fallback(blended, seen_sub, pop_scores, i2it, k=Config.K)
         _write_submission(recs, sub_ids, u2i, out_dir / f"{name}.csv")
@@ -147,7 +120,7 @@ def run(model_names, rrf_ks, n_trials, max_eval_users, out_dir):
         results.append((name, recall_a))
         print(f"  {name:<22} foldA recall@10 = {recall_a:.6f}")
 
-    # ── Ranking ──
+    # Save the ranked summary
     results.sort(key=lambda x: x[1], reverse=True)
     rank_df = pd.DataFrame(results, columns=["candidate", "foldA_recall@10"])
     rank_df.to_csv(out_dir / "_ranking.csv", index=False)
@@ -158,11 +131,11 @@ def run(model_names, rrf_ks, n_trials, max_eval_users, out_dir):
     for i, (name, r) in enumerate(results, 1):
         print(f"{i:2d}. {name:<22} {r:.6f}")
     print("=" * 50)
-    print(f"\nSubmissions in {out_dir}/  —  submit the top few by Fold-A score.")
+    print(f"\nSubmissions in {out_dir}/  -  submit the top few by Fold-A score.")
 
 
 def _write_submission(recs_list, sub_ids, user_to_idx, path):
-    """Write recommendations to the Kaggle CSV format."""
+    # Write recommendations to the Kaggle CSV format.
     sub_df = pd.read_csv(Config.SAMPLE_SUBMISSION_PATH)
     found = [u for u in sub_ids if u in user_to_idx]
     id_to_rec = {uid: recs for uid, recs in zip(found, recs_list)}

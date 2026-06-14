@@ -1,20 +1,3 @@
-"""
-BERT4Rec-style sequential recommender (Sun et al., CIKM 2019, simplified).
-
-Learns from chronological sequences:  previous items + [MASK] → next item,
-via a Transformer encoder with a masked-language-model objective.
-
-This is the only model that uses interaction ORDER, so it adds an orthogonal
-(sequential) signal to the ensemble. Ported to our Recommender interface using
-the shared DataBundle index space.
-
-Index convention inside the network:
-    0            = PAD
-    1 .. n_items = real items   (internal = global_idx + 1)
-    n_items + 1  = MASK
-Scores are returned in global item-index space (the real-item logits).
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -25,7 +8,6 @@ from torch.utils.data import Dataset, DataLoader
 from src.config import RANDOM_SEED
 from src.data import DataBundle
 from src.models.base import Recommender
-
 
 class _SeqDataset(Dataset):
     def __init__(self, sequences, targets, max_len, mask_idx, pad_idx):
@@ -44,7 +26,6 @@ class _SeqDataset(Dataset):
         if pad > 0:
             seq = [self.pad_idx] * pad + seq
         return torch.tensor(seq, dtype=torch.long), torch.tensor(self.targets[idx], dtype=torch.long)
-
 
 class _Bert4RecNet(nn.Module):
     def __init__(self, num_items, max_len=20, dim=128, heads=4, layers=2, dropout=0.2, pad_idx=0):
@@ -71,14 +52,7 @@ class _Bert4RecNet(nn.Module):
         enc = self.encoder(x, src_key_padding_mask=pad_mask)
         return self.output_layer(enc[:, -1, :])   # logits at the [MASK] position
 
-
 class Bert4RecRecommender(Recommender):
-    """
-    Parameters
-    ----------
-    max_seq_len, embedding_dim, num_heads, num_layers, dropout : architecture.
-    epochs, batch_size, lr, weight_decay : optimisation settings.
-    """
 
     def __init__(
         self,
@@ -110,7 +84,7 @@ class Bert4RecRecommender(Recommender):
         self._device = None
         self._pad_idx = 0
         self._mask_idx = None
-        self._sequences = None   # global-index sequences per user (from bundle)
+        self._sequences = None   # User histories from the data bundle.
 
     def fit(self, bundle: DataBundle) -> "Bert4RecRecommender":
         torch.manual_seed(self.random_state)
@@ -119,13 +93,13 @@ class Bert4RecRecommender(Recommender):
         self._store_id_maps(bundle)
         n_items = bundle.n_items
         self._mask_idx = n_items + 1
-        self._sequences = bundle.user_sequences   # {user_idx: [global item idx, time-ordered]}
+        self._sequences = bundle.user_sequences
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Bert4Rec: training on {self._device}  "
               f"(dim={self.embedding_dim}, layers={self.num_layers}, epochs={self.epochs})…")
 
-        # Build prefix → next-item training examples (internal indices = global + 1)
+        # Build examples where the model predicts the next item.
         sequences, targets = [], []
         for u_idx, hist in self._sequences.items():
             internal = [g + 1 for g in hist]
@@ -167,7 +141,7 @@ class Bert4RecRecommender(Recommender):
         return self
 
     def _build_input(self, u_idx):
-        """Masked, left-padded input sequence for one user (internal indices)."""
+        # Build one masked sequence for a user.
         hist = self._sequences.get(u_idx, [])
         internal = [g + 1 for g in hist][-(self.max_seq_len - 1):] + [self._mask_idx]
         pad = self.max_seq_len - len(internal)
@@ -176,15 +150,15 @@ class Bert4RecRecommender(Recommender):
         return internal
 
     def score_users(self, user_idxs: np.ndarray) -> np.ndarray:
-        """Forward each user's masked sequence → real-item logits. float32 [U × n_items]."""
+        # Score all items from each user history.
         out = np.zeros((len(user_idxs), self.n_items), dtype=np.float32)
         with torch.no_grad():
             for start in range(0, len(user_idxs), self.score_batch_size):
                 batch_ids = user_idxs[start:start + self.score_batch_size]
                 seqs = torch.tensor([self._build_input(int(u)) for u in batch_ids],
                                     dtype=torch.long, device=self._device)
-                logits = self._model(seqs)                 # [b × (n_items+2)]
-                # Drop PAD (0) and MASK (n_items+1) → real items map to global 0..n_items-1
+                logits = self._model(seqs)
+                # Drop PAD and MASK, keeping only real item scores.
                 real = logits[:, 1:self.n_items + 1]
                 out[start:start + len(batch_ids)] = real.cpu().numpy()
         return out

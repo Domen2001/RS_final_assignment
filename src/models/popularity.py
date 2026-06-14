@@ -1,11 +1,3 @@
-"""
-Popularity recommender.
-
-Baseline and universal fallback.  Supports optional exponential time-decay
-so that more recently interacted items are ranked higher — useful given the
-temporal nature of the train/test split.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -13,46 +5,29 @@ import numpy as np
 from src.data import DataBundle
 from src.models.base import Recommender
 
-
 class PopularityRecommender(Recommender):
-    """
-    Recommend globally popular items, optionally weighted by recency.
-
-    Parameters
-    ----------
-    halflife_days : float or None
-        Exponential decay half-life for timestamps (in days).
-        None = uniform count-based popularity.
-    """
 
     def __init__(self, halflife_days: float | None = 365):
         self.halflife_days = halflife_days
-        self._item_scores: np.ndarray | None = None  # [n_items]
+        self._item_scores: np.ndarray | None = None
 
     def fit(self, bundle: DataBundle) -> "PopularityRecommender":
         self._store_id_maps(bundle)
 
-        # Reconstruct interaction timestamps from the training matrix.
-        # We need the original DataFrame for decay, which we don't have here.
-        # Instead, use interaction counts (no decay) from the matrix —
-        # decay is applied in train_all.py when a DataFrame is available.
+        # Without timestamps, just count interactions per item.
+        # Instead, use interaction counts from the matrix
         counts = np.asarray(bundle.train_matrix.sum(axis=0)).ravel().astype(np.float32)
         self._item_scores = counts
         return self
 
     def fit_with_decay(self, bundle: DataBundle, df) -> "PopularityRecommender":
-        """
-        Fit with exponential time-decay.
-
-        df must contain user_id, item_id, timestamp columns (ms epoch).
-        Requires halflife_days to be set.
-        """
+        # Use timestamps so newer interactions count more.
         self._store_id_maps(bundle)
 
         if self.halflife_days is None:
             return self.fit(bundle)
 
-        # Convert half-life to ms-epoch decay constant
+        # Convert half-life to the same time unit as the data.
         halflife_ms = self.halflife_days * 86_400_000.0
         decay_lambda = np.log(2) / halflife_ms
 
@@ -70,11 +45,11 @@ class PopularityRecommender(Recommender):
         return self
 
     def score_users(self, user_idxs: np.ndarray) -> np.ndarray:
-        """Broadcast the global popularity vector for each requested user."""
+        # Score every item for each requested user.
         return np.tile(self._item_scores, (len(user_idxs), 1))
 
     def _fallback_recommend(self, seen_items, k):
-        """Popularity-based fallback for unknown users (used by other models)."""
+        # Use popular unseen items when a model has no user data.
         if self._item_scores is None:
             return []
         scores = self._item_scores.copy()
